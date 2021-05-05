@@ -1,22 +1,29 @@
-#See https://aka.ms/containerfastmode to understand how Visual Studio uses this Dockerfile to build your images for faster debugging.
-
-FROM mcr.microsoft.com/dotnet/aspnet:5.0 AS base
-WORKDIR /app
-EXPOSE 80
-EXPOSE 443
-
-FROM mcr.microsoft.com/dotnet/sdk:5.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:5.0-alpine AS publish
 WORKDIR /src
 COPY ["Microservice-Container-Sample/Microservice-Container-Sample.csproj", "Microservice-Container-Sample/"]
-RUN dotnet restore "Microservice-Container-Sample/Microservice-Container-Sample.csproj"
+
+RUN dotnet restore "Microservice-Container-Sample/Microservice-Container-Sample.csproj" --runtime alpine-x64
 COPY . .
 WORKDIR "/src/Microservice-Container-Sample"
-RUN dotnet build "Microservice-Container-Sample.csproj" -c Release -o /app/build
+RUN dotnet publish "Microservice-Container-Sample.csproj" -c Release -o /app/publish \
+  --no-restore \
+  --runtime alpine-x64 \
+  --self-contained true \
+  /p:PublishTrimmed=true \
+  /p:PublishSingleFile=true
 
-FROM build AS publish
-RUN dotnet publish "Microservice-Container-Sample.csproj" -c Release -o /app/publish
+FROM mcr.microsoft.com/dotnet/runtime-deps:5.0-alpine AS final
 
-FROM base AS final
+RUN adduser --disabled-password \
+  --home /app \
+  --gecos '' dotnetuser && chown -R dotnetuser /app
+
+# upgrade musl to remove potential vulnerability
+RUN apk upgrade musl
+
+USER dotnetuser
 WORKDIR /app
+EXPOSE 80
 COPY --from=publish /app/publish .
-ENTRYPOINT ["dotnet", "Microservice-Container-Sample.dll"]
+
+ENTRYPOINT ["./Microservice-Container-Sample"]
